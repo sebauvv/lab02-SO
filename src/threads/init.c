@@ -38,23 +38,23 @@
 #include "filesys/fsutil.h"
 #endif
 
-/* Page directory with kernel mappings only. */
+/** Page directory with kernel mappings only. */
 uint32_t *init_page_dir;
 
 #ifdef FILESYS
-/* -f: Format the file system? */
+/** -f: Format the file system? */
 static bool format_filesys;
 
-/* -filesys, -scratch, -swap: Names of block devices to use,
+/** -filesys, -scratch, -swap: Names of block devices to use,
    overriding the defaults. */
 static const char *filesys_bdev_name;
 static const char *scratch_bdev_name;
 #ifdef VM
 static const char *swap_bdev_name;
 #endif
-#endif /* FILESYS */
+#endif /**< FILESYS */
 
-/* -ul: Maximum number of pages to put into palloc's user pool. */
+/** -ul: Maximum number of pages to put into palloc's user pool. */
 static size_t user_page_limit = SIZE_MAX;
 
 static void bss_init (void);
@@ -70,11 +70,11 @@ static void locate_block_devices (void);
 static void locate_block_device (enum block_type, const char *name);
 #endif
 
-int main (void) NO_RETURN;
+int pintos_init (void) NO_RETURN;
 
-/* Pintos main program. */
+/** Pintos main entry point. */
 int
-main (void)
+pintos_init (void)
 {
   char **argv;
 
@@ -129,15 +129,55 @@ main (void)
 
   printf ("Boot complete.\n");
   
-  /* Run actions specified on kernel command line. */
-  run_actions (argv);
+  if (*argv != NULL) {
+    /* Run actions specified on kernel command line. */
+    run_actions (argv);
+  } else {
+    // TODO: no command line passed to kernel. Run interactively 
+    char buf[256];
+    uint8_t ch;
+    int end;
+
+    while (1) {
+      end = 0;
+      printf ("PKUOS>");
+
+      // getline
+      while (1) {
+        ch = input_getc ();
+        printf ("%c", ch);
+        if (ch == ' ') {
+          continue;
+        }
+        if (ch == '\n' || ch == '\r') {
+          buf[end] = '\0';
+          break;
+        } else {
+          buf[end] = ch;
+        }
+        ++end;
+      }
+      printf("\n");
+
+      if (strcmp(buf, "whoami") == 0) {
+        printf ("Fudanyrd <3096842671@qq.com>\n");
+        continue;
+      }
+      if (strcmp (buf, "exit") == 0) {
+        printf("Bye.\n");
+        break;
+      } else {
+        printf ("invalid command\n");
+      }
+    }
+  }
 
   /* Finish up. */
   shutdown ();
   thread_exit ();
 }
-
-/* Clear the "BSS", a segment that should be initialized to
+
+/** Clear the "BSS", a segment that should be initialized to
    zeros.  It isn't actually stored on disk or zeroed by the
    kernel loader, so we have to zero it ourselves.
 
@@ -150,7 +190,7 @@ bss_init (void)
   memset (&_start_bss, 0, &_end_bss - &_start_bss);
 }
 
-/* Populates the base page directory and page table with the
+/** Populates the base page directory and page table with the
    kernel virtual mapping, and then sets up the CPU to use the
    new page directory.  Points init_page_dir to the page
    directory it creates. */
@@ -188,7 +228,7 @@ paging_init (void)
   asm volatile ("movl %0, %%cr3" : : "r" (vtop (init_page_dir)));
 }
 
-/* Breaks the kernel command line into words and returns them as
+/** Breaks the kernel command line into words and returns them as
    an argv-like array. */
 static char **
 read_command_line (void) 
@@ -223,7 +263,7 @@ read_command_line (void)
   return argv;
 }
 
-/* Parses options in ARGV[]
+/** Parses options in ARGV[]
    and returns the first non-option argument. */
 static char **
 parse_options (char **argv) 
@@ -277,22 +317,24 @@ parse_options (char **argv)
   return argv;
 }
 
-/* Runs the task specified in ARGV[1]. */
+/** Runs the task specified in ARGV[1]. */
 static void
 run_task (char **argv)
 {
   const char *task = argv[1];
   
   printf ("Executing '%s':\n", task);
+  int exitcode;
 #ifdef USERPROG
-  process_wait (process_execute (task));
+  exitcode = process_wait (process_execute (task));
 #else
   run_test (task);
 #endif
+  /* The tests taught me a lesson: DO NOT MODIFY OUTPUTS! */
   printf ("Execution of '%s' complete.\n", task);
 }
 
-/* Executes all of the actions specified in ARGV[]
+/** Executes all of the actions specified in ARGV[]
    up to the null pointer sentinel. */
 static void
 run_actions (char **argv) 
@@ -300,9 +342,9 @@ run_actions (char **argv)
   /* An action. */
   struct action 
     {
-      char *name;                       /* Action name. */
-      int argc;                         /* # of args, including action name. */
-      void (*function) (char **argv);   /* Function to execute action. */
+      char *name;                       /**< Action name. */
+      int argc;                         /**< # of args, including action name. */
+      void (*function) (char **argv);   /**< Function to execute action. */
     };
 
   /* Table of supported actions. */
@@ -343,7 +385,7 @@ run_actions (char **argv)
   
 }
 
-/* Prints a kernel command line help message and powers off the
+/** Prints a kernel command line help message and powers off the
    machine. */
 static void
 usage (void)
@@ -387,7 +429,7 @@ usage (void)
 }
 
 #ifdef FILESYS
-/* Figure out what block devices to cast in the various Pintos roles. */
+/** Figure out what block devices to cast in the various Pintos roles. */
 static void
 locate_block_devices (void)
 {
@@ -398,7 +440,7 @@ locate_block_devices (void)
 #endif
 }
 
-/* Figures out what block device to use for the given ROLE: the
+/** Figures out what block device to use for the given ROLE: the
    block device with the given NAME, if NAME is non-null,
    otherwise the first block device in probe order of type
    ROLE. */

@@ -7,13 +7,15 @@
 #include "filesys/inode.h"
 #include "filesys/directory.h"
 
-/* Partition that contains the file system. */
+/** Partition that contains the file system. */
 struct block *fs_device;
 
 static void do_format (void);
 
-/* Initializes the file system module.
+/** Initializes the file system module.
    If FORMAT is true, reformats the file system. */
+static struct lock fs_lock;
+
 void
 filesys_init (bool format) 
 {
@@ -24,13 +26,17 @@ filesys_init (bool format)
   inode_init ();
   free_map_init ();
 
+  /* Initialize lock */
+  lock_init (&fs_lock);
+  filesys_lock = &fs_lock;
+
   if (format) 
     do_format ();
 
   free_map_open ();
 }
 
-/* Shuts down the file system module, writing any unwritten data
+/** Shuts down the file system module, writing any unwritten data
    to disk. */
 void
 filesys_done (void) 
@@ -38,13 +44,14 @@ filesys_done (void)
   free_map_close ();
 }
 
-/* Creates a file named NAME with the given INITIAL_SIZE.
+/** Creates a file named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
 bool
 filesys_create (const char *name, off_t initial_size) 
 {
+  lock_acquire (filesys_lock);
   block_sector_t inode_sector = 0;
   struct dir *dir = dir_open_root ();
   bool success = (dir != NULL
@@ -55,10 +62,11 @@ filesys_create (const char *name, off_t initial_size)
     free_map_release (inode_sector, 1);
   dir_close (dir);
 
+  lock_release (filesys_lock);
   return success;
 }
 
-/* Opens the file with the given NAME.
+/** Opens the file with the given NAME.
    Returns the new file if successful or a null pointer
    otherwise.
    Fails if no file named NAME exists,
@@ -66,6 +74,7 @@ filesys_create (const char *name, off_t initial_size)
 struct file *
 filesys_open (const char *name)
 {
+  lock_acquire (filesys_lock);
   struct dir *dir = dir_open_root ();
   struct inode *inode = NULL;
 
@@ -73,24 +82,28 @@ filesys_open (const char *name)
     dir_lookup (dir, name, &inode);
   dir_close (dir);
 
-  return file_open (inode);
+  struct file *ret = file_open (inode);
+  lock_release (filesys_lock);  
+  return ret;
 }
 
-/* Deletes the file named NAME.
+/** Deletes the file named NAME.
    Returns true if successful, false on failure.
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 bool
 filesys_remove (const char *name) 
 {
+  lock_acquire (filesys_lock);
   struct dir *dir = dir_open_root ();
   bool success = dir != NULL && dir_remove (dir, name);
   dir_close (dir); 
 
+  lock_release (filesys_lock);
   return success;
 }
 
-/* Formats the file system. */
+/** Formats the file system. */
 static void
 do_format (void)
 {

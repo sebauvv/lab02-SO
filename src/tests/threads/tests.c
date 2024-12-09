@@ -12,6 +12,9 @@ struct test
 static const struct test tests[] = 
   {
     {"alarm-single", test_alarm_single},
+    {"alarm-simple", test_alarm_simple},
+    {"alarm-simple2", test_alarm_simple2},
+    {"alarm-moderate", test_alarm_moderate},
     {"alarm-multiple", test_alarm_multiple},
     {"alarm-simultaneous", test_alarm_simultaneous},
     {"alarm-priority", test_alarm_priority},
@@ -29,6 +32,13 @@ static const struct test tests[] =
     {"priority-preempt", test_priority_preempt},
     {"priority-sema", test_priority_sema},
     {"priority-condvar", test_priority_condvar},
+    {"priority-lock", test_priority_lock},
+    {"mlfqs-frac-add", test_mlfqs_frac_add},
+    {"mlfqs-frac-sub", test_mlfqs_frac_sub},
+    {"mlfqs-frac-mult", test_mlfqs_frac_mult},
+    {"mlfqs-frac-div", test_mlfqs_frac_div},
+    {"mlfqs-frac-mixed", test_mlfqs_frac_mixed},
+    {"mlfqs-to-int", test_mlfqs_to_int},
     {"mlfqs-load-1", test_mlfqs_load_1},
     {"mlfqs-load-60", test_mlfqs_load_60},
     {"mlfqs-load-avg", test_mlfqs_load_avg},
@@ -42,7 +52,7 @@ static const struct test tests[] =
 
 static const char *test_name;
 
-/* Runs the test named NAME. */
+/** Runs the test named NAME. */
 void
 run_test (const char *name) 
 {
@@ -60,7 +70,7 @@ run_test (const char *name)
   PANIC ("no test named \"%s\"", name);
 }
 
-/* Prints FORMAT as if with printf(),
+/** Prints FORMAT as if with printf(),
    prefixing the output by the name of the test
    and following it with a new-line character. */
 void
@@ -75,7 +85,7 @@ msg (const char *format, ...)
   putchar ('\n');
 }
 
-/* Prints failure message FORMAT as if with printf(),
+/** Prints failure message FORMAT as if with printf(),
    prefixing the output by the name of the test and FAIL:
    and following it with a new-line character,
    and then panics the kernel. */
@@ -93,7 +103,7 @@ fail (const char *format, ...)
   PANIC ("test failed");
 }
 
-/* Prints a message indicating the current test passed. */
+/** Prints a message indicating the current test passed. */
 void
 pass (void) 
 {

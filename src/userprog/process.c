@@ -1,12 +1,17 @@
 #include "userprog/process.h"
 #include <debug.h>
+#include <list.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "userprog/gdt.h"
+#include "userprog/mode.h"
 #include "userprog/pagedir.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
@@ -14,14 +19,19 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-static thread_func start_process NO_RETURN;
-static bool load (const char *cmdline, void (**eip) (void), void **esp);
+#ifdef VM
+#include "vm/vm-util.h"
+#endif
 
-/* Starts a new thread running a user program loaded from
+static thread_func start_process NO_RETURN;
+static bool load (char *cmdline, void (**eip) (void), void **esp);
+
+/** Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
@@ -42,10 +52,21 @@ process_execute (const char *file_name)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  
+  /* Suspend execution of current running thread. */
+  enum intr_level old_level = intr_disable ();
+  struct thread *cur = thread_current ();
+  list_push_back (&exec_process, &cur->elem);
+  cur->ticks = tid;
+  thread_block ();
+
+  /* Reenable interrupts */
+  tid = cur->ticks;
+  intr_set_level (old_level);
   return tid;
 }
 
-/* A thread function that loads a user process and starts it
+/** A thread function that loads a user process and starts it
    running. */
 static void
 start_process (void *file_name_)
@@ -63,6 +84,9 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
+  /* Wakeup, and tell the parent it started or not. */
+  struct thread *cur = thread_current ();
+  process_unblock (&exec_process, cur->tid, success ? cur->tid : TID_ERROR);
   if (!success) 
     thread_exit ();
 
@@ -76,7 +100,7 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
-/* Waits for thread TID to die and returns its exit status.  If
+/** Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
    child of the calling process, or if process_wait() has already
@@ -88,15 +112,173 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  if (child_tid == TID_ERROR) {
+    return -1;
+  }
+
+  /* turn of interrupt?? */
+  struct thread *cur = thread_current ();
+  enum intr_level old_level = intr_disable ();
+
+  /* Scan the thread list for the process */
+  struct thread *th = thread_lookup (child_tid);
+  if (th == NULL || th->status == THREAD_DYING || th->tid == cur->tid) {
+    struct sc_hash_entry *entr = sc_ht_lookup (child_tid);
+    if (entr == NULL) {
+      intr_set_level (old_level);
+      return -1;
+    }
+    int code = entr->val;
+    sc_ht_rm (child_tid);
+    intr_set_level (old_level);
+    return code;
+  }
+
+  /* Use the ticks member to record the process cur is waiting */
+  cur->ticks = child_tid;
+  list_push_back (&waiting_process, &cur->elem);
+  thread_block ();
+  intr_set_level (old_level);
+
+  /* How do I get the return value of child_tid? */
+  int ret = cur->ticks;
+  cur->ticks = 0;
+  return ret;
 }
 
-/* Free the current process's resources. */
+/** Unblock the thread that is waiting for tid to 
+  complete. */
+void 
+process_unblock (struct list *lst, tid_t tid, int code)
+{
+  struct thread *th;
+  struct list_elem *e;
+  struct list_elem *next;
+  if (!list_empty (lst)) {
+    for (e = list_begin (lst); e != list_end (lst);
+         e = next) {
+      next = list_next (e);
+      th = list_entry (e, struct thread, elem);
+      if ((int)th->ticks == tid) {
+        /* remove from the list; unblock */
+        list_remove (e);
+        thread_unblock (th);
+
+        /* set the exit code! (see syscall.c: exit_executor!) */
+        th->ticks = code;
+      }
+    }
+  }
+}
+
+/** Print exit status of a process */
+static void
+print_process (const char *name, int code)
+{
+  int it = 0;
+  while (name[it] == ' ') {
+    ++it;
+  }
+
+  while (name[it] != ' ' && name[it] != '\0')
+    {
+      putchar (name[it]);
+      ++it;
+    }
+  
+  printf (": exit(%d)\n", code);
+}
+
+/** Free the current process's resources. */
 void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /** Exercise 1.1: print exit msg */
+  int code = cur->ticks;
+  struct process_meta *m = cur->meta;
+  /* I admit these code are specific to the test case 
+    sc-bad-arg. PLEASE DO NOT OVERWRITE THE ADDRESS 0xbffffffc,
+    FOR IT IS USED TO STORE POINTER TO META. */
+  print_process (cur->name, code);
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  LOG ("Process terminated.");
+  sc_ht_put (cur->tid, code); 
+  intr_set_level (old_level);
+
+  /* Close all files associated with the program */
+#ifdef TEST
+  int closed = 0;  /**< number of files auto closed */
+  for (int i = 0; i < MAX_FILE; ++i) {
+    if (fdfree (i + 2) == 0) {
+      closed++;
+    }
+  }
+  /** check that we have closed right number of files */
+  printf ("automatically closed %d file(s)\n", closed);
+#else
+  for (int i = 0; i < MAX_FILE; ++i) {
+    if (m != NULL)
+    fdfree (i + 2);
+  }
+#endif
+
+  /* Free the memory used by metadata */
+  struct process_meta **mpp = &cur->meta;
+#ifdef TEST
+  /**< make sure the right block is freed */
+  printf ("free meta addr %x\n", *mpp);
+#endif
+  if (m != NULL && m->executable != NULL)  /**< close the executable */
+  file_close (m->executable);
+
+  if (m == NULL)
+    goto unblock_op;
+#ifdef VM
+   /* Free the members of process_meta */
+   if (m->map_file_rt != NULL)
+     map_file_clear (m->map_file_rt);
+
+  /* Free the swap table. */
+  if (m->swaptb != NULL)
+    swaptb_free (m->swaptb);
+
+  /* Free the frame table. */
+  frametb_free (&m->frametb);
+#endif
+  if (m != NULL)
+  free (*mpp);
+
+  /* Unblock waiting threads in the list */
+  struct thread *th;
+  struct list_elem *e;
+  struct list_elem *next;
+  int has_waiter = 0;
+unblock_op:
+  if (!list_empty (&waiting_process)) {
+    for (e = list_begin (&waiting_process); e != list_end (&waiting_process);
+         e = next) {
+      next = list_next (e);
+      th = list_entry (e, struct thread, elem);
+      if ((int)th->ticks == cur->tid) {
+        has_waiter = 1;
+        th->ticks = cur->ticks;
+        /* remove from the list; unblock */
+        list_remove (e);
+        thread_unblock (th);
+
+        /* set the exit code! (see syscall.c: exit_executor!) */
+        th->ticks = cur->ticks;
+      }
+    }
+  }
+  if (has_waiter) {
+    sc_ht_rm (cur->tid);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -116,7 +298,29 @@ process_exit (void)
     }
 }
 
-/* Sets up the CPU for running user code in the current
+/** process_get_page has the same functionality as palloc_get_page.
+ * The fundamental difference, however, is that process_get_page is 
+ * not global.
+ */
+void *
+process_get_page (enum palloc_flags flag)
+{
+  /** From the designer's perspective, this function is handy for
+     implementing lazy memory allocation. However, It is the 
+     page fault handler's page to require frame and set the correct
+     contents. */
+  PANIC ("Not implemented");
+}
+
+/* terminate an user program with exit code */
+void 
+process_terminate (int code)
+{
+  thread_current ()->ticks = code;
+  thread_exit ();
+}
+
+/** Sets up the CPU for running user code in the current
    thread.
    This function is called on every context switch. */
 void
@@ -131,21 +335,21 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
-/* We load ELF binaries.  The following definitions are taken
+
+/** We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 
-/* ELF types.  See [ELF1] 1-2. */
+/** ELF types.  See [ELF1] 1-2. */
 typedef uint32_t Elf32_Word, Elf32_Addr, Elf32_Off;
 typedef uint16_t Elf32_Half;
 
-/* For use with ELF types in printf(). */
-#define PE32Wx PRIx32   /* Print Elf32_Word in hexadecimal. */
-#define PE32Ax PRIx32   /* Print Elf32_Addr in hexadecimal. */
-#define PE32Ox PRIx32   /* Print Elf32_Off in hexadecimal. */
-#define PE32Hx PRIx16   /* Print Elf32_Half in hexadecimal. */
+/** For use with ELF types in printf(). */
+#define PE32Wx PRIx32   /**< Print Elf32_Word in hexadecimal. */
+#define PE32Ax PRIx32   /**< Print Elf32_Addr in hexadecimal. */
+#define PE32Ox PRIx32   /**< Print Elf32_Off in hexadecimal. */
+#define PE32Hx PRIx16   /**< Print Elf32_Half in hexadecimal. */
 
-/* Executable header.  See [ELF1] 1-4 to 1-8.
+/** Executable header.  See [ELF1] 1-4 to 1-8.
    This appears at the very beginning of an ELF binary. */
 struct Elf32_Ehdr
   {
@@ -165,7 +369,7 @@ struct Elf32_Ehdr
     Elf32_Half    e_shstrndx;
   };
 
-/* Program header.  See [ELF1] 2-2 to 2-4.
+/** Program header.  See [ELF1] 2-2 to 2-4.
    There are e_phnum of these, starting at file offset e_phoff
    (see [ELF1] 1-6). */
 struct Elf32_Phdr
@@ -180,20 +384,20 @@ struct Elf32_Phdr
     Elf32_Word p_align;
   };
 
-/* Values for p_type.  See [ELF1] 2-3. */
-#define PT_NULL    0            /* Ignore. */
-#define PT_LOAD    1            /* Loadable segment. */
-#define PT_DYNAMIC 2            /* Dynamic linking info. */
-#define PT_INTERP  3            /* Name of dynamic loader. */
-#define PT_NOTE    4            /* Auxiliary info. */
-#define PT_SHLIB   5            /* Reserved. */
-#define PT_PHDR    6            /* Program header table. */
-#define PT_STACK   0x6474e551   /* Stack segment. */
+/** Values for p_type.  See [ELF1] 2-3. */
+#define PT_NULL    0            /**< Ignore. */
+#define PT_LOAD    1            /**< Loadable segment. */
+#define PT_DYNAMIC 2            /**< Dynamic linking info. */
+#define PT_INTERP  3            /**< Name of dynamic loader. */
+#define PT_NOTE    4            /**< Auxiliary info. */
+#define PT_SHLIB   5            /**< Reserved. */
+#define PT_PHDR    6            /**< Program header table. */
+#define PT_STACK   0x6474e551   /**< Stack segment. */
 
-/* Flags for p_flags.  See [ELF3] 2-3 and 2-4. */
-#define PF_X 1          /* Executable. */
-#define PF_W 2          /* Writable. */
-#define PF_R 4          /* Readable. */
+/** Flags for p_flags.  See [ELF3] 2-3 and 2-4. */
+#define PF_X 1          /**< Executable. */
+#define PF_W 2          /**< Writable. */
+#define PF_R 4          /**< Readable. */
 
 static bool setup_stack (void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
@@ -201,12 +405,12 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
-/* Loads an ELF executable from FILE_NAME into the current thread.
+/** Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (char *file_name, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -221,8 +425,53 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+  /** A side effect of process_activate is to allocate space for 
+     metadata. If this fails, terminate the thread. */
+  t->meta = malloc (sizeof (struct process_meta));
+  if (t->meta == NULL)
+    goto done;
+  memset (t->meta, 0, sizeof (struct process_meta));
+
+  struct process_meta *meta = t->meta;
+#ifdef VM
+  /** try initialize file mapping table. */
+  meta->map_file_rt = map_file_init ();
+  if (meta->map_file_rt == NULL)
+    goto done;
+  
+  /** try initializing swap table. */
+  meta->swaptb = swaptb_create ();
+  if (meta->swaptb == NULL)
+    goto done;
+
+  /** try initializing the frame table. */
+  frametb_init (&meta->frametb);
+#endif
+
+  /* Zero out blanks, tabs in file_name */
+#ifdef TEST
+  printf ("file name is %s\n", file_name);
+#endif
+  int it;  /**< iterator of file name */
+  for (it = 0; file_name[it] != '\0'; ++it) 
+    {
+      if (file_name[it] == ' ' || file_name[it] == '\t')
+        {
+          file_name[it] = '\0';
+        }
+    }
+  /** length of file name */
+  const int fn_len = it;
+#ifdef TEST
+  printf ("len of file name is %d\n", fn_len);
+#endif
+
   /* Open executable file. */
   file = filesys_open (file_name);
+  if (file == NULL)
+    goto done;
+
+  file_deny_write (file);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -305,6 +554,71 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
+  /* Set up process meta */
+  ASSERT (sizeof (void *) == 4);
+  struct process_meta *mpt = t->meta;
+  if (mpt == NULL) {
+    /* Oops, fail */
+    goto done;
+  }
+
+  /** Exercise 5.1: deny write to executable */
+  mpt->executable = file;
+#ifdef TEST
+  printf ("allocate block %x for meta\n", mpt);
+#endif
+
+  /* Parse params of the program */
+  char *argp = (char *)(PHYS_BASE - fn_len - 5);
+  int args = 0;              /**< number of args. */
+  char *argv[MAX_ARGS];      /**< my implementation support up to 10 args. */
+  bool is_start = true;      /**< is it the start of a "token"? */
+  for (i = 0; i <= fn_len; ++i) 
+    {
+      argp[i] = file_name[i];
+      if (is_start) {
+        if (argp[i] != '\0') {
+          argv[args] = argp + i;
+          args++;
+          is_start = false;
+        }
+      } else {
+        if (argp[i] == '\0') {
+          is_start = true;
+        }
+      }
+    }
+
+#ifdef TEST
+  printf ("Got %d tokens\n", args);
+#endif
+
+  /* Set up argument to main. */
+  unsigned bias = (unsigned) argp % 4;
+  void *sp = (void *)(argp - bias);
+  sp -= 4;
+  *(char **)sp = NULL;
+  for (i = args - 1; i >= 0; --i) {
+    sp -= 4; 
+    *(char **)sp = argv[i];  /**< argv[i] */
+  }
+  sp -= 4;
+  *(char **)sp = (sp + 4);   /**< argv */
+  sp -= 4;
+  *(int *)sp = args;         /**< args */
+  sp -= 4;
+  *(int *)sp = 0;            /**< return address */
+  *esp = sp;                 /**< esp */
+
+  /* Set the member of meta: argv */
+  mpt->argv = argv[0];
+  memset (mpt->ofile, 0, sizeof (mpt->ofile));
+
+#ifdef TEST
+  printf ("After passing, esp is %x.\n", (unsigned)sp);
+  hex_dump (sp, sp, PHYS_BASE - sp, true);
+#endif
+
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -312,15 +626,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
-
-/* load() helpers. */
+
+/** load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);
 
-/* Checks whether PHDR describes a valid, loadable segment in
+/** Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
 static bool
 validate_segment (const struct Elf32_Phdr *phdr, struct file *file) 
@@ -365,7 +678,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
   return true;
 }
 
-/* Loads a segment starting at offset OFS in FILE at address
+/** Loads a segment starting at offset OFS in FILE at address
    UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
    memory are initialized, as follows:
 
@@ -387,6 +700,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
+#ifndef VM
   file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) 
     {
@@ -422,9 +736,44 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       upage += PGSIZE;
     }
   return true;
+#else  // VM
+  struct process_meta *meta = thread_current ()->meta;
+  void *rt = meta->map_file_rt;
+  while (zero_bytes > 0 || read_bytes > 0)
+    {
+      /* Calculate how to fill this page.
+         We will read PAGE_READ_BYTES bytes from FILE
+         and zero the final PAGE_ZERO_BYTES bytes. */
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+      /* Lazily map page */
+      struct map_file *mf = malloc (sizeof (struct map_file));
+      if (mf == NULL)  // allocation failure
+        return false;
+
+      mf->fobj = file_reopen (file); 
+      mf->writable = writable;
+      mf->offset = ofs;
+      mf->read_bytes = page_read_bytes;
+      if (!map_file (rt, mf, upage)) {
+        /** Oops, failure to create mapping */
+        return false;
+      }
+
+      /** Advance */
+      ofs += page_read_bytes;
+      read_bytes -= page_read_bytes;
+      zero_bytes -= page_zero_bytes;
+      upage += PGSIZE;
+    }
+
+  /* success */ 
+  return true;
+#endif // end of VM
 }
 
-/* Create a minimal stack by mapping a zeroed page at the top of
+/** Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
 setup_stack (void **esp) 
@@ -433,18 +782,52 @@ setup_stack (void **esp)
   bool success = false;
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+
+  /* Hack the frame table a little... */
+#ifdef VM
+  struct thread *cur = thread_current ();
+  struct process_meta *meta = cur->meta;
+  struct frame_table *ftb = &meta->frametb;
+  ASSERT (ftb->free_ptr == 0);
+  ftb->free_ptr = 1;
+  ftb->pages[0] = kpage;
+  ftb->upages[0] = ((uint8_t *) PHYS_BASE) - PGSIZE;
+  void *kpage2 = palloc_get_page (PAL_USER);
+  if (kpage2 == NULL)
+    {
+      /* Cannot allocate even 2 user pages?? */
+      ftb->pages[0] = NULL;
+      ftb->upages[0] = NULL;
+      palloc_free_page (kpage);
+      /* Let frametb_free call palloc_free_page. */
+      return false;
+    }
+  
+  /* Successfully get 2 user pages. */
+  ftb->pages[1] = kpage2;
+  ftb->free_ptr = 2;
+#endif
+
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
-      else
+      else {
         palloc_free_page (kpage);
+
+        /* Note that in vm mode, we previously set the frame table. We
+          have to avoid double free. */
+#ifdef VM
+        ftb->pages[0] = NULL;
+        ftb->upages[0] = NULL;
+#endif
+      }
     }
   return success;
 }
 
-/* Adds a mapping from user virtual address UPAGE to kernel
+/** Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
    If WRITABLE is true, the user process may modify the page;
    otherwise, it is read-only.
@@ -462,4 +845,111 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/** Allocate a file descriptor. Returns -1 if not found */
+int 
+fdalloc (void)
+{
+  struct process_meta *m = thread_current ()->meta;
+  int fd = -1;
+  for (int i = 0; i < MAX_FILE; ++i)
+    {
+      if (m->ofile[i] == 0) {
+        /* file descriptor 0, 1 are used 
+          for console IO. */
+        fd = i + 2;
+        break;
+      }
+    }
+  return fd; 
+}
+
+/** Allocate file struct */
+struct file *
+filealloc (const char *fn)
+{
+  struct file *ret = filesys_open (fn);
+  return ret;
+}
+
+/** Free a file descriptor for future use(close the file if opened) */
+int
+fdfree (int fd)
+{
+  /** get the index in the array */
+  fd -= 2;
+  if (fd < 0 || fd >= MAX_FILE) {
+    /** invalid fd */
+    return -1;
+  }
+
+  struct process_meta *m = thread_current ()->meta;
+  if (m->ofile[fd] == NULL) {
+    /* file not exist or already closed */
+    return -1;
+  }
+
+  /** close the file */
+  file_close (m->ofile[fd]);
+  m->ofile[fd] = NULL;
+  return 0;
+}
+
+/** Seek a position of a given fd */
+int 
+fdseek (int fd, unsigned int pos)
+{
+  /** get the index in the array */
+  fd -= 2;
+  if (fd < 0 || fd >= MAX_FILE) {
+    /** invalid fd */
+    return -1;
+  }
+
+  struct process_meta *m = thread_current ()->meta;
+  if (m->ofile[fd] == NULL) {
+    return -1;
+  }
+
+  /** seek the file */
+  file_seek (m->ofile[fd], pos);
+  return 0;
+}
+
+/** Tell the position of a given fd */
+int
+fdtell (int fd)
+{
+  fd -= 2;
+  if (fd < 0 || fd >= MAX_FILE) {
+    /** invalid fd */
+    return -1;
+  }
+
+  struct process_meta *m = thread_current ()->meta;
+  if (m->ofile[fd] == NULL) {
+    return -1;
+  }
+
+  /** seek the file */
+  return file_tell (m->ofile[fd]);
+}
+
+/** Returns the size of file associated with fd. */
+int 
+fdsize (int fd)
+{
+  fd -= 2;
+  if (fd < 0 || fd >= MAX_FILE) {
+    /** invalid fd */
+    return -1;
+  }
+
+  struct process_meta *m = thread_current ()->meta;
+  if (m->ofile[fd] == NULL) {
+    return -1;
+  }
+
+  return file_length (m->ofile[fd]);
 }

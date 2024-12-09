@@ -1,17 +1,26 @@
 #include "userprog/exception.h"
+#include "userprog/mode.h"
+#include "userprog/pagedir.h"
+#include "userprog/process.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
+#include "threads/palloc.h"
+#include "threads/vaddr.h"
 #include "threads/thread.h"
 
-/* Number of page faults processed. */
+#ifdef VM
+#include "vm/vm-util.h"
+#endif
+
+/** Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
 
-/* Registers handlers for interrupts that can be caused by user
+/** Registers handlers for interrupts that can be caused by user
    programs.
 
    In a real Unix-like OS, most of these interrupts would be
@@ -60,14 +69,14 @@ exception_init (void)
   intr_register_int (14, 0, INTR_OFF, page_fault, "#PF Page-Fault Exception");
 }
 
-/* Prints exception statistics. */
+/** Prints exception statistics. */
 void
 exception_print_stats (void) 
 {
   printf ("Exception: %lld page faults\n", page_fault_cnt);
 }
 
-/* Handler for an exception (probably) caused by a user process. */
+/** Handler for an exception (probably) caused by a user process. */
 static void
 kill (struct intr_frame *f) 
 {
@@ -81,6 +90,7 @@ kill (struct intr_frame *f)
      
   /* The interrupt frame's code segment value tells us where the
      exception originated. */
+   thread_current ()->ticks = -1;
   switch (f->cs)
     {
     case SEL_UCSEG:
@@ -108,7 +118,43 @@ kill (struct intr_frame *f)
     }
 }
 
-/* Page fault handler.  This is a skeleton that must be filled in
+/** returns true if esp is a valid stack pointer. */
+static bool
+validate_stack (void *esp) 
+{
+  return (esp <= PHYS_BASE) && (esp >= STACK_LOW);
+}
+
+#ifdef VM
+#include "vm/vm-util.h"
+/** Handle page fault happened at uaddr. Returns true if successful */
+int
+process_handle_pgfault (void *uaddr, void *esp)
+{
+  /* [WARNING] repetition of code, almost same logic as in page_fault! */
+  if (!is_user_vaddr (uaddr)) /* Fail */
+    return 0;
+
+  void *res = vm_fetch_page (uaddr);
+
+  if (res != NULL)
+    return res;
+  /* Try to install the stack. */
+  if (esp == NULL) /* If esp is null, abort. */
+    return res != NULL;
+  
+  if (!validate_stack (esp) || uaddr < esp)
+    return 0;
+  
+  /* Install the stack. */
+  void *page = vm_alloc_page (0, uaddr);
+  struct thread *cur = thread_current ();
+  pagedir_set_page (cur->pagedir, pg_round_down (uaddr), page, true);
+  return page != NULL;
+}
+#endif
+
+/** Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
 
@@ -122,10 +168,10 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f) 
 {
-  bool not_present;  /* True: not-present page, false: writing r/o page. */
-  bool write;        /* True: access was write, false: access was read. */
-  bool user;         /* True: access by user, false: access by kernel. */
-  void *fault_addr;  /* Fault address. */
+  bool not_present;  /**< True: not-present page, false: writing r/o page. */
+  bool write;        /**< True: access was write, false: access was read. */
+  bool user;         /**< True: access by user, false: access by kernel. */
+  void *fault_addr;  /**< Fault address. */
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -147,6 +193,48 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+
+  if (user) {
+      struct thread *cur = thread_current ();
+      /* Detect writing to read-only-page or access violation */
+      if (!is_user_vaddr (fault_addr)) /* Definite access violation */
+        goto kill_user;
+      if (pagedir_get_page (cur->pagedir, fault_addr) != NULL)
+        goto kill_user;
+#ifdef VM
+      if (vm_fetch_page (pg_round_down (fault_addr))) {
+        return;
+      }
+#endif
+
+#ifdef USERPROG
+    /** Check and expand the stack */
+    if (not_present && validate_stack (f->esp) && fault_addr >= f->esp - 32) {
+      /** install page on stack */
+#ifndef VM
+      void *page = palloc_get_page (PAL_USER);
+#else
+      void *page = vm_alloc_page (0, pg_round_down (fault_addr));
+#endif
+      if (page == NULL) 
+        goto kill_user;
+      
+      struct thread *cur = thread_current ();
+      pagedir_set_page (cur->pagedir, pg_round_down (fault_addr),
+                        page, true);
+
+      /** Successfully installed stack. */
+      return;
+    }
+
+#endif
+  kill_user:
+   /* elegantly terminate the program */
+   f->eip = (void (*) (void)) f->eax;
+   f->eax = -1;
+   process_terminate (-1);
+   return;
+  }
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to

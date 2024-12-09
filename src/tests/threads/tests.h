@@ -6,6 +6,9 @@ void run_test (const char *);
 typedef void test_func (void);
 
 extern test_func test_alarm_single;
+extern test_func test_alarm_simple;
+extern test_func test_alarm_simple2;
+extern test_func test_alarm_moderate;
 extern test_func test_alarm_multiple;
 extern test_func test_alarm_simultaneous;
 extern test_func test_alarm_priority;
@@ -23,6 +26,13 @@ extern test_func test_priority_fifo;
 extern test_func test_priority_preempt;
 extern test_func test_priority_sema;
 extern test_func test_priority_condvar;
+extern test_func test_priority_lock;
+extern test_func test_mlfqs_frac_add;
+extern test_func test_mlfqs_frac_sub;
+extern test_func test_mlfqs_frac_mult;
+extern test_func test_mlfqs_frac_div;
+extern test_func test_mlfqs_frac_mixed;
+extern test_func test_mlfqs_to_int;
 extern test_func test_mlfqs_load_1;
 extern test_func test_mlfqs_load_60;
 extern test_func test_mlfqs_load_avg;
@@ -37,5 +47,5 @@ void msg (const char *, ...);
 void fail (const char *, ...);
 void pass (void);
 
-#endif /* tests/threads/tests.h */
+#endif /**< tests/threads/tests.h */
 

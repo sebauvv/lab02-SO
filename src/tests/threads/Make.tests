@@ -1,18 +1,21 @@
 # -*- makefile -*-
 
 # Test names.
-tests/threads_TESTS = $(addprefix tests/threads/,alarm-single		\
-alarm-multiple alarm-simultaneous alarm-priority alarm-zero		\
+tests/threads_TESTS = $(addprefix tests/threads/,alarm-single alarm-simple	\
+alarm-multiple alarm-simultaneous alarm-priority alarm-zero	alarm-simple2	\
+alarm-moderate priority-lock \
 alarm-negative priority-change priority-donate-one			\
 priority-donate-multiple priority-donate-multiple2			\
 priority-donate-nest priority-donate-sema priority-donate-lower		\
 priority-fifo priority-preempt priority-sema priority-condvar		\
 priority-donate-chain                                                   \
 mlfqs-load-1 mlfqs-load-60 mlfqs-load-avg mlfqs-recent-1 mlfqs-fair-2	\
-mlfqs-fair-20 mlfqs-nice-2 mlfqs-nice-10 mlfqs-block)
+mlfqs-fair-20 mlfqs-nice-2 mlfqs-nice-10 mlfqs-block mlfqs-frac-add \
+mlfqs-frac-sub mlfqs-frac-mult mlfqs-frac-div mlfqs-to-int mlfqs-frac-mixed )
 
 # Sources for tests.
 tests/threads_SRC  = tests/threads/tests.c
+tests/threads_SRC += tests/threads/alarm-simple.c
 tests/threads_SRC += tests/threads/alarm-wait.c
 tests/threads_SRC += tests/threads/alarm-simultaneous.c
 tests/threads_SRC += tests/threads/alarm-priority.c
@@ -29,7 +32,9 @@ tests/threads_SRC += tests/threads/priority-fifo.c
 tests/threads_SRC += tests/threads/priority-preempt.c
 tests/threads_SRC += tests/threads/priority-sema.c
 tests/threads_SRC += tests/threads/priority-condvar.c
+tests/threads_SRC += tests/threads/priority-lock.c
 tests/threads_SRC += tests/threads/priority-donate-chain.c
+tests/threads_SRC += tests/threads/mlfqs-frac.c
 tests/threads_SRC += tests/threads/mlfqs-load-1.c
 tests/threads_SRC += tests/threads/mlfqs-load-60.c
 tests/threads_SRC += tests/threads/mlfqs-load-avg.c
