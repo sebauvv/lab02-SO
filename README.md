@@ -2,7 +2,7 @@
 
 Lo siguiente contiene lo que se ha logrado avanzar y abordando algunos puntos específicos que no se pueden contestar de la plantilla adjunta al laboratorio.
 
-## Ejercicio 01
+## Ejercicio 01: Memory Access & Write Syscall
 
 En lo que es acceso a la memoria de usuario, se realizó:
 
@@ -75,8 +75,7 @@ static int write_executor(void *args) {
 }
 ```
 
-## Ejercicio 02: Implementación de Paginación Lazy para Segmentos de Ejecutables
-
+## Ejercicio 02: Lazy Paging
 
 Para esto se realizaron varias modificaciones en los archivos dentro de las carpetas `userprog` y `vm`. 
 
@@ -268,7 +267,7 @@ map_file (void *rt, struct map_file *mf, void *uaddr)
   return true;
 }
 ```
-## Stack Growth
+## Ejercicio 03: Stack Growth
 
 
 ### Instalación de stack
