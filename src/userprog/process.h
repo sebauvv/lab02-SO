@@ -22,7 +22,7 @@ typedef struct frame_entry
 #endif
 
 /** +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
- *                           Data Structures  
+ *                           Data Structures 
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+- */
 
 struct file;
@@ -35,7 +35,7 @@ struct swap_table_dir;
 
 /** Metadata of a user process(put on stack) */
 struct process_meta
-  { 
+  {
     char           *argv;       /**< Position of argv */
     struct file    *ofile[MAX_FILE];
                                 /**< File descriptor table */
@@ -48,7 +48,7 @@ struct process_meta
   };
 
 /** +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
- *                         Process Operators 
+ *                         Process Operators
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+- */
 
 tid_t process_execute (const char *file_name);
@@ -63,7 +63,7 @@ int process_handle_pgfault (void *uaddr, void *esp);
 #endif
 
 /** +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-
- *                          File Operators 
+ *                          File Operators
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+- */
 
 int fdalloc (void);

@@ -36,7 +36,7 @@ static void page_fault (struct intr_frame *);
    Refer to [IA32-v3a] section 5.15 "Exception and Interrupt
    Reference" for a description of each of these exceptions. */
 void
-exception_init (void) 
+exception_init (void)
 {
   /* These exceptions can be raised explicitly by a user program,
      e.g. via the INT, INT3, INTO, and BOUND instructions.  Thus,
@@ -71,14 +71,14 @@ exception_init (void)
 
 /** Prints exception statistics. */
 void
-exception_print_stats (void) 
+exception_print_stats (void)
 {
   printf ("Exception: %lld page faults\n", page_fault_cnt);
 }
 
 /** Handler for an exception (probably) caused by a user process. */
 static void
-kill (struct intr_frame *f) 
+kill (struct intr_frame *f)
 {
   /* This interrupt is one (probably) caused by a user process.
      For example, the process might have tried to access unmapped
@@ -87,7 +87,7 @@ kill (struct intr_frame *f)
      the kernel.  Real Unix-like operating systems pass most
      exceptions back to the process via signals, but we don't
      implement them. */
-     
+
   /* The interrupt frame's code segment value tells us where the
      exception originated. */
    thread_current ()->ticks = -1;
@@ -99,7 +99,7 @@ kill (struct intr_frame *f)
       printf ("%s: dying due to interrupt %#04x (%s).\n",
               thread_name (), f->vec_no, intr_name (f->vec_no));
       intr_dump_frame (f);
-      thread_exit (); 
+      thread_exit ();
 
     case SEL_KCSEG:
       /* Kernel's code segment, which indicates a kernel bug.
@@ -107,7 +107,7 @@ kill (struct intr_frame *f)
          may cause kernel exceptions--but they shouldn't arrive
          here.)  Panic the kernel to make the point.  */
       intr_dump_frame (f);
-      PANIC ("Kernel bug - unexpected interrupt in kernel"); 
+      PANIC ("Kernel bug - unexpected interrupt in kernel");
 
     default:
       /* Some other code segment?  Shouldn't happen.  Panic the
@@ -120,7 +120,7 @@ kill (struct intr_frame *f)
 
 /** returns true if esp is a valid stack pointer. */
 static bool
-validate_stack (void *esp) 
+validate_stack (void *esp)
 {
   return (esp <= PHYS_BASE) && (esp >= STACK_LOW);
 }
@@ -142,10 +142,10 @@ process_handle_pgfault (void *uaddr, void *esp)
   /* Try to install the stack. */
   if (esp == NULL) /* If esp is null, abort. */
     return res != NULL;
-  
+
   if (!validate_stack (esp) || uaddr < esp)
     return 0;
-  
+
   /* Install the stack. */
   void *page = vm_alloc_page (0, uaddr);
   struct thread *cur = thread_current ();
@@ -166,7 +166,7 @@ process_handle_pgfault (void *uaddr, void *esp)
    description of "Interrupt 14--Page Fault Exception (#PF)" in
    [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
 static void
-page_fault (struct intr_frame *f) 
+page_fault (struct intr_frame *f)
 {
   bool not_present;  /**< True: not-present page, false: writing r/o page. */
   bool write;        /**< True: access was write, false: access was read. */
@@ -216,9 +216,8 @@ page_fault (struct intr_frame *f)
 #else
       void *page = vm_alloc_page (0, pg_round_down (fault_addr));
 #endif
-      if (page == NULL) 
+      if (page == NULL)
         goto kill_user;
-      
       struct thread *cur = thread_current ();
       pagedir_set_page (cur->pagedir, pg_round_down (fault_addr),
                         page, true);

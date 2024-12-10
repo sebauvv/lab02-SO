@@ -23,7 +23,7 @@
 
 static void syscall_handler (struct intr_frame *);
 
-/** Look up a key in the htable, 
+/** Look up a key in the htable,
    returns the pointer to that entry.  */
 struct sc_hash_entry *
 sc_ht_lookup (tid_t key)
@@ -43,9 +43,9 @@ sc_ht_lookup (tid_t key)
   return NULL;
 }
 
-/** Put a value in the htable, 
+/** Put a value in the htable,
    if key exists, overwrite existing value */
-void 
+void
 sc_ht_put (tid_t key, int val)
 {
   if (key < 0) {
@@ -67,7 +67,7 @@ sc_ht_put (tid_t key, int val)
 }
 
 /** Remove a key in the hash table. */
-void 
+void
 sc_ht_rm (tid_t key)
 {
   if (key < 0) {
@@ -88,7 +88,7 @@ sc_ht_rm (tid_t key)
       }
       free (cur);
       break;
-    } 
+    }
 
     /* Start next iteration */
     prev = cur;
@@ -117,7 +117,7 @@ sc_install_stack (uint32_t *pagetable, void *esp, void *start, void *end)
   }
 
   void *page = pg_round_down (start);
-  for (; page < pg_round_up (end); page += PGSIZE) 
+  for (; page < pg_round_up (end); page += PGSIZE)
     {
       void *kaddr = pagedir_get_page (pagetable, page);
       if (kaddr != NULL) {
@@ -144,8 +144,8 @@ sc_install_stack (uint32_t *pagetable, void *esp, void *start, void *end)
  * @return 0x80000000 | bytes if page fault.
  */
 static unsigned int
-copy_from_user (uint32_t *pagetable, void *uaddr, void *kbuf, 
-                unsigned int bytes) 
+copy_from_user (uint32_t *pagetable, void *uaddr, void *kbuf,
+                unsigned int bytes)
 {
   /* validate parameters */
   ASSERT (pagetable != NULL && kbuf != NULL);
@@ -155,7 +155,7 @@ copy_from_user (uint32_t *pagetable, void *uaddr, void *kbuf,
   if (!is_user_vaddr (uaddr)) {
     /* Page fault immediately */
     return 0x80000000;
-  } 
+  }
 
   /* Once loopup a page, and copy only relevant part. */
   void *ptr = pg_round_down (uaddr);  /**< page-aligned address */
@@ -219,8 +219,8 @@ copy_from_user (uint32_t *pagetable, void *uaddr, void *kbuf,
  * @param bufsz kernel buffer size
  * @return 0: success, 1: (about to) overflow buffer, 2: page fault
  */
-static int 
-cpstr_from_user (uint32_t *pagetable, char *uaddr, char *kbuf, 
+static int
+cpstr_from_user (uint32_t *pagetable, char *uaddr, char *kbuf,
                  unsigned int bufsz)
 {
   /* validate parameters */
@@ -233,7 +233,7 @@ cpstr_from_user (uint32_t *pagetable, char *uaddr, char *kbuf,
   char *ptr = pg_round_down (uaddr);  /**< page-aligned address */
   unsigned int pgleft;        /**< bytes left in a page */
   unsigned int bytes = 0;     /**< bytes write to kbuf */
-  for (; ptr < PHYS_BASE; ) 
+  for (; ptr < PHYS_BASE; )
     {
       void *kaddr = pagedir_get_page (pagetable, ptr);
       if (kaddr == NULL) {
@@ -269,12 +269,12 @@ cpstr_from_user (uint32_t *pagetable, char *uaddr, char *kbuf,
       ptr += PGSIZE;
       uaddr = ptr;
     }
-  
+
   /* ok. */
   return 0;
 }
 
-/** Copy to user buffer. 
+/** Copy to user buffer.
  * @param pagetable user page table
  * @param kbuf start of kernel address
  * @param uaddr user buffer
@@ -282,7 +282,7 @@ cpstr_from_user (uint32_t *pagetable, char *uaddr, char *kbuf,
  * on page fault(then the program should terminate with -1).
  */
 static unsigned int
-copy_to_user (uint32_t *pagetable, void *kbuf, void *uaddr, 
+copy_to_user (uint32_t *pagetable, void *kbuf, void *uaddr,
               unsigned int bytes, void *esp)
 {
   /* validate parameters */
@@ -341,7 +341,7 @@ copy_to_user (uint32_t *pagetable, void *kbuf, void *uaddr,
 }
 
 void
-syscall_init (void) 
+syscall_init (void)
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
   list_init (&waiting_process);
@@ -356,7 +356,7 @@ syscall_init (void)
 #endif
 }
 
-/** From interrupt frame, get the system call id. */ 
+/** From interrupt frame, get the system call id. */
 static int
 syscall_id (struct intr_frame *f)
 {
@@ -372,9 +372,9 @@ syscall_id (struct intr_frame *f)
    */
 
   /** At first glance, the return value should be *(int *)(f->esp),
-     but don't we need address translation here? why? 
-     > Q1: what is the operating page table at this point? 
-     > Q2: if the kernel page table is operating, how do we 
+     but don't we need address translation here? why?
+     > Q1: what is the operating page table at this point?
+     > Q2: if the kernel page table is operating, how do we
      read some bytes from user space?
 
      Ans: this is one line of output from <syscall_handler+15>:
@@ -382,8 +382,8 @@ syscall_id (struct intr_frame *f)
      obviosly intr-frame is in kernel space, and f->esp is in user space.
      Hence *(int *)f->esp is safe.
 
-     Well, I admit to have make a mistake in the comments above. 
-     child-bad program taught me that you should use safe way to 
+     Well, I admit to have make a mistake in the comments above.
+     child-bad program taught me that you should use safe way to
      access user memory.
    */
   if (!is_user_vaddr (f->esp)) {
@@ -412,8 +412,8 @@ syscall_args (struct intr_frame *f)
   return (f->esp + 4);
 }
 
-static int 
-halt_executor (void *args UNUSED) 
+static int
+halt_executor (void *args UNUSED)
 {
   /* Shut down the machine */
   shutdown_power_off ();
@@ -422,8 +422,8 @@ halt_executor (void *args UNUSED)
   return 0;
 }
 
-static int 
-exit_executor (void *args) 
+static int
+exit_executor (void *args)
 {
   /* Syscall start */
   struct intr_frame *f = args;
@@ -469,7 +469,7 @@ static int mmap_executor (void *args);
 static int munmap_executor (void *args);
 
 /** list of implemented system calls */
-static syscall_executor_t syscall_executors[] = 
+static syscall_executor_t syscall_executors[] =
   {
     [SYS_EXIT] exit_executor,
     [SYS_EXEC] exec_executor,
@@ -488,11 +488,11 @@ syscall_executor_cnt = (sizeof (syscall_executors)
                       / sizeof (syscall_executors[0]));
 
 static void
-syscall_handler (struct intr_frame *f UNUSED) 
+syscall_handler (struct intr_frame *f UNUSED)
 {
   /* Check if the system call is implemented. */
   int id = syscall_id (f);
-  if (id >= 0 && id < syscall_executor_cnt) 
+  if (id >= 0 && id < syscall_executor_cnt)
     {
       syscall_executor_t executor = syscall_executors[id];
       int ret = executor (f);
@@ -504,8 +504,8 @@ syscall_handler (struct intr_frame *f UNUSED)
   /* pintos -p ../../examples/echo -a echo  -- -f -q run 'echo' */
   /* In the process of implementing system calls, there must be some
     you have not implemented! */
-#ifdef TEST  
-  printf ("intr frame f is %x, f->esp is %x\n", (unsigned)f, 
+#ifdef TEST
+  printf ("intr frame f is %x, f->esp is %x\n", (unsigned)f,
                                                 (unsigned)(f->esp));
   ASSERT (is_kernel_vaddr ((void *)f));
   ASSERT (is_user_vaddr (f->esp));
@@ -515,7 +515,7 @@ syscall_handler (struct intr_frame *f UNUSED)
   thread_exit ();
 }
 
-static int 
+static int
 exec_executor (void *args)
 {
   /* Syscall start */
@@ -527,7 +527,7 @@ exec_executor (void *args)
   char *uaddr;
   struct thread *cur = thread_current ();
   unsigned bytes;
-  
+
   /* parse arguments */
   char buf[256];
   sc_install_stack (cur->pagedir, f->esp, argv, argv + sizeof (uaddr));
@@ -556,7 +556,7 @@ exec_executor (void *args)
   for (int i = 0; i < sizeof (buf); ++i) {
     if (buf[i] == ' ') {
       bytes = 1;
-      ret = i; 
+      ret = i;
       break;
     }
     if (buf[i] == '\0') {
@@ -565,18 +565,18 @@ exec_executor (void *args)
       break;
     }
   }
-  buf[ret] = '\0'; 
+  buf[ret] = '\0';
   struct file *fobj = filesys_open (buf);
   if (fobj == NULL) {
     return -1;
   }
   file_close (fobj);
-  if (bytes) 
+  if (bytes)
     buf[ret] = ' ';
   return process_execute (buf);
-} 
+}
 
-static int 
+static int
 wait_executor (void *args)
 {
   /* Syscall start */
@@ -600,7 +600,7 @@ wait_executor (void *args)
   return process_wait (tid);
 }
 
-static int 
+static int
 create_executor (void *args)
 {
   /* Syscall start */
@@ -641,7 +641,7 @@ create_executor (void *args)
   return (int) filesys_create (kbuf, init_sz);
 }
 
-static int 
+static int
 remove_executor (void *args)
 {
   /* Syscall start */
@@ -681,8 +681,8 @@ remove_executor (void *args)
 }
 
 /** Returns file descriptor if success; -1 on failure */
-static int 
-open_executor (void *args) 
+static int
+open_executor (void *args)
 {
   /* Syscall start */
   struct intr_frame *f = args;
@@ -741,7 +741,7 @@ open_executor (void *args)
   return ret;
 }
 
-static int 
+static int
 filesize_executor (void *args)
 {
   /* Syscall start */
@@ -765,14 +765,14 @@ filesize_executor (void *args)
   return fdsize (fd);
 }
 
-static int 
+static int
 read_executor (void *args)
 {
   /* Syscall start */
   struct intr_frame *f = args;
   void *argv = syscall_args (f);
 
-  /** note: prototype of write is 
+  /** note: prototype of write is
      int read (int fd, void *buffer, unsigned length); */
   struct thread *cur = thread_current ();
 
@@ -851,14 +851,14 @@ read_executor (void *args)
   return ret;
 }
 
-static int 
+static int
 write_executor (void *args)
 {
   /* Syscall start */
   struct intr_frame *f = args;
   void *argv = syscall_args (f);
 
-  /** note: prototype of write is 
+  /** note: prototype of write is
      int write (int fd, void *buffer, unsigned length); */
   struct thread *cur = thread_current ();
 
@@ -957,7 +957,7 @@ tell_executor (void *args)
   return fdtell (fd);
 }
 
-static int 
+static int
 seek_executor (void *args)
 {
   /* Syscall start */
@@ -978,7 +978,7 @@ seek_executor (void *args)
     /** do not support Console IO */
     return -1;
   }
-  bytes = copy_from_user (cur->pagedir, argv + 4, &pos, sizeof (pos));  
+  bytes = copy_from_user (cur->pagedir, argv + 4, &pos, sizeof (pos));
   if (bytes != sizeof (pos)) {
     return -1;
   }
@@ -987,7 +987,7 @@ seek_executor (void *args)
   return fdseek (fd, pos);
 }
 
-static int 
+static int
 close_executor (void *args)
 {
   /* Syscall start */
